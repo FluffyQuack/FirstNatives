@@ -9,13 +9,18 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include "reframework/API.hpp"
+#include "..\dllmain.hpp"
+
+using namespace reframework;
+
 bool pred(byte b1, byte b2)
 {
     if (b1 == b2)return true;
     if (b2 == '?')return true;
     return false;
 }
-std::vector<byte*> aob(const std::string& str)
+std::vector<byte*> aob(const std::string& str, const char *functionName)
 {
     std::vector<byte> bytes = parseHex(str);
     std::vector<byte*> results;
@@ -49,8 +54,15 @@ std::vector<byte*> aob(const std::string& str)
         memInfo = {};
     }
 
+    //If AOB was found, then output the results to a log
+    if (results.size() == 1 && logFile)
+    {
+        fprintf(logFile, "Found AOB %s for %s at %llu\r\n", str.c_str(), functionName, (ULONG64) results[0]);
+    }
+
     return results;
 }
+/*
 std::vector<byte*> aob(const std::string& str, const char* GameName)
 {
     std::vector<byte> bytes = parseHex(str);
@@ -87,6 +99,7 @@ std::vector<byte*> aob(const std::string& str, const char* GameName)
 
     return results;
 }
+*/
 std::vector<byte*> scanmem(const std::vector<byte>& bytes) {
     std::vector<byte*> results;
     auto module = GetModuleHandleA("MHRiseSunbreakDemo.exe");

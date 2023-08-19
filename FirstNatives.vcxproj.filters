@@ -18,21 +18,9 @@
     <ClCompile Include="dllmain.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="include\memory_patch.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="include\memory_patch.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="include\util.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="include\reframework\API.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="include\reframework\API.hpp">
+    <ClInclude Include="dllmain.hpp">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

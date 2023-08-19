@@ -17,19 +17,27 @@ void* (*_loadFile)(void*, wchar_t*, int) = (void* (*)(void*, wchar_t*, int))0; /
 int (*CheckFileInPak)(void*, UINT64) = (int (*)(void*, UINT64))0; //MHRiseSunbreakDemo.exe+3057E80
 UINT64(*PathToHash)(wchar_t*) = (ULONG64(*)(wchar_t*))0; //MHRiseSunbreakDemo.exe+3058DF0
 void(*_CloseHandle)(HANDLE*) = (void(*)(HANDLE*))0; //143bdcee0
-bool(*prePath)(void*, wchar_t*, void*);//MonsterHunterRise.exe + 3D57430
-void(*loadPfb)(void* rfb, bool t);//143E63700
+bool(*prePath)(void*, wchar_t*, void*) = 0;//MonsterHunterRise.exe + 3D57430
+void(*loadPfb)(void* rfb, bool t) = 0;//143E63700
+
+wchar_t *(*AddDriveToPath)(wchar_t*) = 0; //re4.exe+35FE370
 
 //void snow.player.PlayerManager::reqPlayer(void* vmctx, snow.player.PlayerManager* this,snow.player.PlayerRequestEquipsData* equipsData)
 void (*reqPlayer)(void* vmctx, void* self, void* equipsData);
 
-void* (*findMasterPlayer)(void* vmctx, void* self);
+void* (*findMasterPlayer)(void* vmctx, void* self) = 0;
 //System.String * System.Enum::GetName(void *vmctx,System.Type *enumType,System.Object *value)
 
 map<UINT64, string> hashs;
 bool bone = false;
 map<int, string>enums;
 string modelId;
+FILE *logFile = 0;
+bool mhrFunctionsFound = 0;
+
+//Test
+int test = 0;
+
 void* get_method(string type, string name)
 {
     return API::get()->tdb()->find_method(type, name)->get_function_raw();
@@ -49,7 +57,6 @@ void init_enum()
                 int value = field->get_data<int>();
                 enums[value] = name;
             }
-
         }
     }
 }
@@ -68,30 +75,66 @@ void multiByteToWideChar(const string& pKey, wchar_t* pWCStrKey)
     const char* pCStrKey = pKey.c_str();
     int pSize = MultiByteToWideChar(CP_OEMCP, 0, pCStrKey, strlen(pCStrKey) + 1, NULL, 0);
     MultiByteToWideChar(CP_OEMCP, 0, pCStrKey, strlen(pCStrKey) + 1, pWCStrKey, pSize);
-
 }
 
 void hook()
 {
     MH_Initialize();
+
+    //Test
+    if(1)
+    {
+        HookLambda(AddDriveToPath, [](auto a) {
+            wchar_t *ret = original(a);
+            //if(ret != nullptr)
+            {
+                test++;
+                //fprintf(logFile, "%u\r\n", test);
+                //fwprintf(logFile, L"%s\r\n", ret);
+                //string path = wideCharToMultiByte(ret);
+                //UINT64 hash = PathToHash(ret);
+                /*if (filesystem::exists(path.c_str()))
+                    hashs[hash] = path;*/
+            }
+            return ret;
+            });
+        MH_ApplyQueued();
+        if(logFile)
+        {
+            fprintf(logFile, "Init done\r\n");
+            fflush(logFile);
+        }
+        return;
+    }
+
     HookLambda(loadFile, [](auto a, auto b, auto c) {
         if (b == nullptr)return original(a, b, c);
         string path = wideCharToMultiByte(b);
-        auto f = path.find("_shadow.mesh.2109148288", 0);
-        if (f != string::npos)
+        if(mhrFunctionsFound)
         {
-            auto bone_index = path.find("bone", 0);
-            if (bone_index != string::npos && bone)
+            auto f = path.find("_shadow.mesh.2109148288", 0);
+            if (f != string::npos)
             {
-                string npath = path.replace(bone_index, 4, modelId);
-                if (filesystem::exists(npath.c_str()))
+                auto bone_index = path.find("bone", 0);
+                if (bone_index != string::npos && bone)
                 {
-                    path = npath;
-                    multiByteToWideChar(path, b);
+                    string npath = path.replace(bone_index, 4, modelId);
+                    if (filesystem::exists(npath.c_str()))
+                    {
+                        path = npath;
+                        multiByteToWideChar(path, b);
+                    }
                 }
             }
         }
         UINT64 hash = PathToHash(b);
+
+        if(logFile)
+        {
+            fprintf(logFile, "%s\r\n", path.c_str());
+            fflush(logFile);
+        }
+
         if (filesystem::exists(path.c_str()))
         {
             hashs[hash] = path;
@@ -115,67 +158,101 @@ void hook()
         return ret;
         });
 
-    HookLambda(reqPlayer, [](void* vmctx, void* self, void* equipsData) {
-        int* index = offsetPtr<int>(*offsetPtr<void*>(equipsData, 0x10), 0x24);
-        bool suit = true;
-        for (int i = 0; i < 4; i++)
-        {
-            int temp = *index++;
-            suit = suit && (temp == *index);
-        }
-        bone = suit;
-        if (bone)
-        {
-            init_enum();
-            modelId = enums[*index];
-        }
-        return original(vmctx, self, equipsData);
-        }
-    );
+    if(mhrFunctionsFound)
+    {
+        HookLambda(reqPlayer, [](void* vmctx, void* self, void* equipsData) {
+            int* index = offsetPtr<int>(*offsetPtr<void*>(equipsData, 0x10), 0x24);
+            bool suit = true;
+            for (int i = 0; i < 4; i++)
+            {
+                int temp = *index++;
+                suit = suit && (temp == *index);
+            }
+            bone = suit;
+            if (bone)
+            {
+                init_enum();
+                modelId = enums[*index];
+            }
+            return original(vmctx, self, equipsData);
+            }
+        );
+    }
     MH_ApplyQueued();
 }
 
 bool Aob()
 {
     vector<BYTE*> ret;
-    ret = aob("40 55 53 41 56 48 8d ac 24 c0 f0 ff ff");
-    if (ret.size() != 1)
+    if(PathToHash == 0)
     {
+        ret = aob("40 55 53 41 56 48 8d ac 24 c0 f0 ff ff", "PathToHash"); //MHR / RE4 / RE8 / RE7-RT / RE2R-RT / RE3R-RT / SF6
+        if(ret.size() == 1)
+            PathToHash = (ULONG64(*)(wchar_t*))(ret[0]);
+    }
+    if(CheckFileInPak == 0)
+    {
+        ret = aob("48 89 6C 24 20 41 56 48 83 EC 20 48 83 B9 A8 00 00 00 00", "CheckFileInPak"); //RE4 / RE8
+        if(ret.size() != 1)
+            ret = aob("48 89 6C 24 20 41 56 48 83 EC 20 45 33 C0", "CheckFileInPak"); //MHR / SF6
+        if(ret.size() != 1)
+            ret = aob("41 56 41 57 48 83 EC 28 48 83 B9 A8 00 00 00 00", "CheckFileInPak"); //RE7-RT
+        if(ret.size() == 1)
+            CheckFileInPak = (int (*)(void*, UINT64))(ret[0]);
+    }
+    if(loadFile == 0)
+    {
+        ret = aob("40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 48 8D 05 ? ? ? ? 48 89 03 33 C0 48 89 83 98 00 00 00 48 89 83 A0 00 00 00 48 89 83 A8 00 00 00 48 8B C3 48 83 C4 20 5B C3", "loadFile"); //MHR / RE8 / RE7-RT / RE2-RT / RE3-RT
+        if(ret.size() == 1)
+            loadFile = (void* (*)(void*, wchar_t*, int))(ret[0]); //MonsterHunterRise.exe+3B2AF60 
+    }
+    if(_CloseHandle == 0)
+    {
+        ret = aob("40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 48 8B 4B 50 48 85 c9 74 0E FF 15 ? ? ? ? 48 C7 43 50 00 00 00 00 48 83 C4 20 5B C3", "_CloseHandle"); //MHR / RE4 / RE8 / RE7-RT / RE2-RT / RE3-RT / SF6 / RE2 / RE3
+        if(ret.size() == 1)
+            _CloseHandle = (void (*)(HANDLE*))(ret[0]);
+    }
+    if(reqPlayer == 0)
+    {
+        ret = aob("4C 8B DC 49 89 5B 08 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 50 48 8B 42 50 49 8B F0 4C 8B FA 48 89 44 24 40 48 8B D0 41 C6 43 18 00 4D 8D 43 18 48 8B D9 E8", "reqPlayer"); //MHR
+        if(ret.size() == 1)
+            reqPlayer = (void (*)(void*, void*, void*))(ret[0]);
+    }
+    if(AddDriveToPath == 0)
+    {
+        ret = aob("48 89 54 24 10 4c 89 44 24 18 4c 89 4c 24 20 53 48 83 ec 20 4c 8d 4c 24 40 48 8b d9 48 85 c9 74 34 4c 8b c2 ba 00 04 00 00", "AddDriveToPath"); //RE4
+        if(ret.size() == 1)
+            AddDriveToPath = (wchar_t* (*)(wchar_t *))(ret[0]);
+    }
+
+    //Close log file
+    if(logFile)
+        fflush(logFile);
+    if(logFile)
+    {
+        fclose(logFile);
+        logFile = 0;
+    }
+
+    //Test
+    if(AddDriveToPath)
+        return true;
+
+    if(PathToHash && CheckFileInPak && loadFile && _CloseHandle && reqPlayer)
+    {
+        mhrFunctionsFound = 1;
+        return true;
+    }
+    else if(PathToHash && CheckFileInPak && loadFile)
+        return true;
+    else
         return false;
-    }
-    PathToHash = (ULONG64(*)(wchar_t*))(ret[0]);
-    ret = aob("48 89 6C 24 20 41 56 48 83 EC 20 48 83 B9 A8 00 00 00 00"); //48 89 6C 24 20 41 56 48 83 EC 20 48 83 B9 A8 00 00 00 00
-    if (ret.size() != 1)
-    {
-        ret = aob("48 89 6C 24 20 41 56 48 83 EC 20 45 33 C0");
-        if (ret.size() != 1)
-        {
-            return false;
-        }
-    }
-    CheckFileInPak = (int (*)(void*, UINT64))(ret[0]);
-    ret = aob("40 53 48 83 EC 20 48 8B D9 E8 ???? 48 8D 05 ???? 48 89 03 33 C0 48 89 83 98 00 00 00 48 89 83 A0 00 00 00 48 89 83 A8 00 00 00 48 8B C3 48 83 C4 20 5B C3");
-    if (ret.size() != 1)
-    {
-        return false;
-    }
-    loadFile = (void* (*)(void*, wchar_t*, int))(ret[0]);//MonsterHunterRise.exe+3B2AF60 
-    ret = aob("40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 48 8B 4B 50 48 85 c9 74 0E FF 15 ? ? ? ? 48 C7 43 50 00 00 00 00 48 83 C4 20 5B C3");
-    if (ret.size() != 1)
-    {
-        return false;
-    }
-    _CloseHandle = (void (*)(HANDLE*))(ret[0]);
-    ret = aob("4C 8B DC 49 89 5B 08 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 50 48 8B 42 50 49 8B F0 4C 8B FA 48 89 44 24 40 48 8B D0 41 C6 43 18 00 4D 8D 43 18 48 8B D9 E8");
-    if (ret.size() != 1)
-    {
-        return false;
-    }
-    reqPlayer = (void (*)(void*, void*, void*))(ret[0]);
-    return true;
 }
 void Init()
 {
+    //Debug log file
+    fopen_s(&logFile, "FirstNatives.log", "wb");
+
     while (true)
     {
         if (Aob())
