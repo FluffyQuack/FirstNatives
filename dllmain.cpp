@@ -225,14 +225,17 @@ bool Aob()
             AddDriveToPath = (wchar_t* (*)(wchar_t *))(ret[0]);
     }
 
-    //Close log file
+    //Flush log file
     if(logFile)
         fflush(logFile);
+
+    //Close log file
+    /*
     if(logFile)
     {
         fclose(logFile);
         logFile = 0;
-    }
+    }*/
 
     //Test
     if(AddDriveToPath)
