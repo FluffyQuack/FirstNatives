@@ -220,7 +220,7 @@ bool Aob()
     }
     if(LookForPathInPAK == 0)
     {
-        ret = aob("40 55 41 54 41 55 41 57 48 8D AC 24 C8 F0 FF FF", "CheckFileInPak"); //DMC5
+        ret = aob("40 55 41 54 41 55 41 57 48 8D AC 24 C8 F0 FF FF", "LookForPathInPAK"); //DMC5
         if(ret.size() == 1)
             LookForPathInPAK = (int (*)(void *, wchar_t*))(ret[0]);
     }
