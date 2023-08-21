@@ -16,11 +16,13 @@ void* (*loadFile)(void*, wchar_t*, int) = (void* (*)(void*, wchar_t*, int))0; //
 void* (*_loadFile)(void*, wchar_t*, int) = (void* (*)(void*, wchar_t*, int))0; //MonsterHunterRise.exe+3E57D40 
 int (*CheckFileInPak)(void*, UINT64) = (int (*)(void*, UINT64))0; //MHRiseSunbreakDemo.exe+3057E80
 UINT64(*PathToHash)(wchar_t*) = (ULONG64(*)(wchar_t*))0; //MHRiseSunbreakDemo.exe+3058DF0
+int (*LookForPathInPAK)(void *, wchar_t*) = (int (*)(void *, wchar_t*))0; //This is from DMC5, and later versions of the engine evolved this function into PathToHash
 void(*_CloseHandle)(HANDLE*) = (void(*)(HANDLE*))0; //143bdcee0
 bool(*prePath)(void*, wchar_t*, void*) = 0;//MonsterHunterRise.exe + 3D57430
 void(*loadPfb)(void* rfb, bool t) = 0;//143E63700
 
-wchar_t *(*AddDriveToPath)(wchar_t*) = 0; //re4.exe+35FE370
+//This function is called just after loadFile in MHR, but since I couldn't find loadFile in RE4R, I'm using this instead
+void *(*loadFile_step2)(void *, wchar_t*, int) = 0; //14368C700 (first pointer looks to be a pointer to a struct)
 
 //void snow.player.PlayerManager::reqPlayer(void* vmctx, snow.player.PlayerManager* this,snow.player.PlayerRequestEquipsData* equipsData)
 void (*reqPlayer)(void* vmctx, void* self, void* equipsData);
@@ -28,15 +30,22 @@ void (*reqPlayer)(void* vmctx, void* self, void* equipsData);
 void* (*findMasterPlayer)(void* vmctx, void* self) = 0;
 //System.String * System.Enum::GetName(void *vmctx,System.Type *enumType,System.Object *value)
 
+enum
+{
+    LOADMETHOD_NONE,
+    LOADMETHOD_MHR, //Note path's hash if the path exists during loadFile and then return -1 during CheckFileInPak if it's been noted
+    LOADMETHOD_MHR_ALT, //Same as above but we hook into loadFile_step2 rather than loadFile
+    LOADMETHOD_DMC5, //Hook into LookForPathInPAK and return -1 if file path exists
+    LOADMETHOD_MHR_ALT2, //Hook into PathToHash and return 0 if file path exists
+};
+
 map<UINT64, string> hashs;
 bool bone = false;
 map<int, string>enums;
 string modelId;
 FILE *logFile = 0;
 bool mhrFunctionsFound = 0;
-
-//Test
-int test = 0;
+int loadMethod = LOADMETHOD_NONE;
 
 void* get_method(string type, string name)
 {
@@ -81,84 +90,103 @@ void hook()
 {
     MH_Initialize();
 
-    //Test
-    if(1)
+    if(loadMethod == LOADMETHOD_MHR_ALT && loadFile_step2) //RE4R
     {
-        HookLambda(AddDriveToPath, [](auto a) {
-            wchar_t *ret = original(a);
-            //if(ret != nullptr)
-            {
-                test++;
-                //fprintf(logFile, "%u\r\n", test);
-                //fwprintf(logFile, L"%s\r\n", ret);
-                //string path = wideCharToMultiByte(ret);
-                //UINT64 hash = PathToHash(ret);
-                /*if (filesystem::exists(path.c_str()))
-                    hashs[hash] = path;*/
-            }
-            return ret;
-            });
-        MH_ApplyQueued();
-        if(logFile)
-        {
-            fprintf(logFile, "Init done\r\n");
-            fflush(logFile);
-        }
-        return;
-    }
+        HookLambda(loadFile_step2, [](auto a, auto b, auto c) {
+            if (b == nullptr)return original(a, b, c);
+            string path = wideCharToMultiByte(b);
+            UINT64 hash = PathToHash(b);
 
-    HookLambda(loadFile, [](auto a, auto b, auto c) {
-        if (b == nullptr)return original(a, b, c);
-        string path = wideCharToMultiByte(b);
-        if(mhrFunctionsFound)
-        {
-            auto f = path.find("_shadow.mesh.2109148288", 0);
-            if (f != string::npos)
+            if(logFile)
             {
-                auto bone_index = path.find("bone", 0);
-                if (bone_index != string::npos && bone)
+                fprintf(logFile, "%s\r\n", path.c_str());
+                fflush(logFile);
+            }
+
+            if (filesystem::exists(path.c_str()))
+            {
+                hashs[hash] = path;
+            }
+            return original(a, b, c);
+            });
+    }
+    else if(loadMethod == LOADMETHOD_MHR && loadFile) //MHR and others
+    {
+        HookLambda(loadFile, [](auto a, auto b, auto c) {
+            if (b == nullptr)return original(a, b, c);
+            string path = wideCharToMultiByte(b);
+            if(mhrFunctionsFound && reqPlayer)
+            {
+                auto f = path.find("_shadow.mesh.2109148288", 0);
+                if (f != string::npos)
                 {
-                    string npath = path.replace(bone_index, 4, modelId);
-                    if (filesystem::exists(npath.c_str()))
+                    auto bone_index = path.find("bone", 0);
+                    if (bone_index != string::npos && bone)
                     {
-                        path = npath;
-                        multiByteToWideChar(path, b);
+                        string npath = path.replace(bone_index, 4, modelId);
+                        if (filesystem::exists(npath.c_str()))
+                        {
+                            path = npath;
+                            multiByteToWideChar(path, b);
+                        }
                     }
                 }
             }
-        }
-        UINT64 hash = PathToHash(b);
+            UINT64 hash = PathToHash(b);
 
-        if(logFile)
-        {
-            fprintf(logFile, "%s\r\n", path.c_str());
-            fflush(logFile);
-        }
-
-        if (filesystem::exists(path.c_str()))
-        {
-            hashs[hash] = path;
-        }
-        return original(a, b, c);
-        });
-    HookLambda(CheckFileInPak, [](auto a, auto b) { //判断hash是否存在pak中
-        int ret = original(a, b);
-        if (ret == -1)return ret;
-        if (hashs.find(b) != hashs.end())
-        {
-            if (filesystem::exists(hashs[b]))
+            if(logFile)
             {
-                ret = -1;
+                fprintf(logFile, "%s\r\n", path.c_str());
+                fflush(logFile);
             }
-            else
-            {
-                hashs.erase(b);
-            }
-        }
-        return ret;
-        });
 
-    if(mhrFunctionsFound)
+            if (filesystem::exists(path.c_str()))
+            {
+                hashs[hash] = path;
+            }
+            return original(a, b, c);
+            });
+    }
+    else if(loadMethod == LOADMETHOD_DMC5 && LookForPathInPAK) //DMC5
+    {
+        HookLambda(LookForPathInPAK, [](auto a, auto b) {
+            int returnValue = original(a, b);
+            if(returnValue != -1 && b != 0 && b[0] != 0 && filesystem::exists(b))
+                return -1;
+            return returnValue;
+            });
+    }
+    else if(loadMethod == LOADMETHOD_MHR_ALT2 && PathToHash)
+    {
+        HookLambda(PathToHash, [](wchar_t *a) {
+            ULONG64 returnValue = original(a);
+            if(a != 0 && a[0] != 0 && filesystem::exists(a))
+                returnValue = 0;
+            return returnValue;
+            });
+    }
+    
+    if((loadMethod == LOADMETHOD_MHR || loadMethod == LOADMETHOD_MHR_ALT) && CheckFileInPak)
+    {
+        HookLambda(CheckFileInPak, [](auto a, auto b) { //判断hash是否存在pak中
+            int ret = original(a, b);
+            if (ret == -1)return ret;
+            if (hashs.find(b) != hashs.end())
+            {
+                if (filesystem::exists(hashs[b]))
+                {
+                    ret = -1;
+                }
+                else
+                {
+                    hashs.erase(b);
+                }
+            }
+            return ret;
+            });
+    }
+
+    if(mhrFunctionsFound && reqPlayer) //MHR function
     {
         HookLambda(reqPlayer, [](void* vmctx, void* self, void* equipsData) {
             int* index = offsetPtr<int>(*offsetPtr<void*>(equipsData, 0x10), 0x24);
@@ -190,13 +218,19 @@ bool Aob()
         if(ret.size() == 1)
             PathToHash = (ULONG64(*)(wchar_t*))(ret[0]);
     }
+    if(LookForPathInPAK == 0)
+    {
+        ret = aob("40 55 41 54 41 55 41 57 48 8D AC 24 C8 F0 FF FF", "CheckFileInPak"); //DMC5
+        if(ret.size() == 1)
+            LookForPathInPAK = (int (*)(void *, wchar_t*))(ret[0]);
+    }
     if(CheckFileInPak == 0)
     {
         ret = aob("48 89 6C 24 20 41 56 48 83 EC 20 48 83 B9 A8 00 00 00 00", "CheckFileInPak"); //RE4 / RE8
         if(ret.size() != 1)
             ret = aob("48 89 6C 24 20 41 56 48 83 EC 20 45 33 C0", "CheckFileInPak"); //MHR / SF6
         if(ret.size() != 1)
-            ret = aob("41 56 41 57 48 83 EC 28 48 83 B9 A8 00 00 00 00", "CheckFileInPak"); //RE7-RT
+            ret = aob("41 56 41 57 48 83 EC 28 48 83 B9 A8 00 00 00 00", "CheckFileInPak"); //RE7-RT / RE2-RT
         if(ret.size() == 1)
             CheckFileInPak = (int (*)(void*, UINT64))(ret[0]);
     }
@@ -208,7 +242,7 @@ bool Aob()
     }
     if(_CloseHandle == 0)
     {
-        ret = aob("40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 48 8B 4B 50 48 85 c9 74 0E FF 15 ? ? ? ? 48 C7 43 50 00 00 00 00 48 83 C4 20 5B C3", "_CloseHandle"); //MHR / RE4 / RE8 / RE7-RT / RE2-RT / RE3-RT / SF6 / RE2 / RE3
+        ret = aob("40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 48 8B 4B 50 48 85 c9 74 0E FF 15 ? ? ? ? 48 C7 43 50 00 00 00 00 48 83 C4 20 5B C3", "_CloseHandle"); //MHR / RE4 / RE8 / RE7-RT / RE2-RT / RE3-RT / SF6 / RE2 / RE3 / DMC5
         if(ret.size() == 1)
             _CloseHandle = (void (*)(HANDLE*))(ret[0]);
     }
@@ -218,38 +252,51 @@ bool Aob()
         if(ret.size() == 1)
             reqPlayer = (void (*)(void*, void*, void*))(ret[0]);
     }
-    if(AddDriveToPath == 0)
+    if(loadFile_step2 == 0)
     {
-        ret = aob("48 89 54 24 10 4c 89 44 24 18 4c 89 4c 24 20 53 48 83 ec 20 4c 8d 4c 24 40 48 8b d9 48 85 c9 74 34 4c 8b c2 ba 00 04 00 00", "AddDriveToPath"); //RE4
+        ret = aob("48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B F1 44 89 41 08", "loadFile_step2"); //RE4 / RE3-NONRT / DMC5
         if(ret.size() == 1)
-            AddDriveToPath = (wchar_t* (*)(wchar_t *))(ret[0]);
+            loadFile_step2 = (void* (*)(void *, wchar_t*, int))(ret[0]);
     }
-
-    //Flush log file
-    if(logFile)
-        fflush(logFile);
-
-    //Close log file
-    /*
-    if(logFile)
-    {
-        fclose(logFile);
-        logFile = 0;
-    }*/
-
-    //Test
-    if(AddDriveToPath)
-        return true;
-
+    
     if(PathToHash && CheckFileInPak && loadFile && _CloseHandle && reqPlayer)
     {
         mhrFunctionsFound = 1;
-        return true;
+        loadMethod = LOADMETHOD_MHR;
+        if(logFile)
+            fprintf(logFile, "Found functions for MHR load method with additional MHR functions\r\n");
+    }
+    else if(PathToHash)
+    {
+        loadMethod = LOADMETHOD_MHR_ALT2;
+        if(logFile)
+            fprintf(logFile, "Found function for MHR alt2 load method\r\n");
     }
     else if(PathToHash && CheckFileInPak && loadFile)
+    {
+        loadMethod = LOADMETHOD_MHR;
+        if(logFile)
+            fprintf(logFile, "Found functions for MHR load method\r\n");
+    }
+    else if(PathToHash && CheckFileInPak && loadFile_step2) //RE4R
+    {
+        loadMethod = LOADMETHOD_MHR_ALT;
+        if(logFile)
+            fprintf(logFile, "Found functions for MHR alt load method\r\n");
+    }
+    else if(LookForPathInPAK)
+    {
+        loadMethod = LOADMETHOD_DMC5;
+        if(logFile)
+            fprintf(logFile, "Found function for DMC5 load method\r\n");
+    }
+
+    if(logFile)
+        fflush(logFile);
+
+    if(loadMethod != LOADMETHOD_NONE)
         return true;
-    else
-        return false;
+    return false;
 }
 void Init()
 {
