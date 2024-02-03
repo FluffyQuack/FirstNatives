@@ -36,7 +36,7 @@ enum
     LOADMETHOD_MHR, //Note path's hash if the path exists during loadFile and then return -1 during CheckFileInPak if it's been noted
     LOADMETHOD_MHR_ALT, //Same as above but we hook into loadFile_step2 rather than loadFile
     LOADMETHOD_DMC5, //Hook into LookForPathInPAK and return -1 if file path exists
-    LOADMETHOD_MHR_ALT2, //Hook into PathToHash and return 0 if file path exists
+    LOADMETHOD_MHR_ALT2, //Hook into PathToHash and return a hash of 0/1 if file path exists (we originally tried 0/0 but that collided with mod manager that sets hashes to 0/0 when invalidating files)
 };
 
 map<UINT64, string> hashs;
@@ -161,7 +161,7 @@ void hook()
         HookLambda(PathToHash, [](wchar_t *a) {
             ULONG64 returnValue = original(a);
             if(a != 0 && a[0] != 0 && filesystem::exists(a))
-                returnValue = 0;
+                returnValue = 4294967296; //This is a lowercase hash of 0 and uppercase hash of 1. There should be practically zero chance a file actually has this hash for realsies, and this doesn't conflict with the 0 hash the mod manager sets
             return returnValue;
             });
     }
