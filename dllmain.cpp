@@ -46,6 +46,7 @@ string modelId;
 FILE *logFile = 0;
 bool mhrFunctionsFound = 0;
 int loadMethod = LOADMETHOD_NONE;
+static bool pathDumper = 0;
 
 void* get_method(string type, string name)
 {
@@ -97,7 +98,7 @@ void hook()
             string path = wideCharToMultiByte(b);
             UINT64 hash = PathToHash(b);
 
-            if(logFile)
+            if(pathDumper && logFile)
             {
                 fprintf(logFile, "%s\r\n", path.c_str());
                 fflush(logFile);
@@ -134,7 +135,7 @@ void hook()
             }
             UINT64 hash = PathToHash(b);
 
-            if(logFile)
+            if(pathDumper && logFile)
             {
                 fprintf(logFile, "%s\r\n", path.c_str());
                 fflush(logFile);
@@ -159,6 +160,14 @@ void hook()
     else if(loadMethod == LOADMETHOD_MHR_ALT2 && PathToHash)
     {
         HookLambda(PathToHash, [](wchar_t *a) {
+
+            if(pathDumper && logFile)
+            {
+                string path = wideCharToMultiByte(a);
+                fprintf(logFile, "%s\r\n", path.c_str());
+                fflush(logFile);
+            }
+
             ULONG64 returnValue = original(a);
             if(a != 0 && a[0] != 0 && filesystem::exists(a))
                 returnValue = 4294967296; //This is a lowercase hash of 0 and uppercase hash of 1. There should be practically zero chance a file actually has this hash for realsies, and this doesn't conflict with the 0 hash the mod manager sets
